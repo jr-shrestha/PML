@@ -1,0 +1,181 @@
+---
+title: 'Practical Machine Learning: Assignment'
+author: "J R Shrestha"
+date: "May 29, 2016"
+output: html_document
+---
+
+##1. Synopsis
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The main goal of this project is to predict the manner in which the six participants performed some exercises. The machine learning algorithm described here is applied to the 20 test cases available in the test data.
+
+###Data Source
+The datasets for this project are available in the following locations:
+
+* Training data Set: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+* Test data Set    : https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##2. Preprocessing
+
+###a. Environment Setup
+```{r Environment_Setup, message=FALSE, warning=FALSE, cache=TRUE}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+#library(rattle)
+library(randomForest)
+library(corrplot)
+
+#value to be used by set.seed() for Reproducibility
+mySeedValue = 1981 
+set.seed(mySeedValue) 
+```
+
+###b. Data Loading
+```{r Data_Loading, , cache=TRUE}
+train.url  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url   <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train.file <- "./data/pml-training.csv"
+test.file  <- "./data/pml-testing.csv"
+
+if(!file.exists(train.file)){
+    download.file(train.url, destfile=train.file)
+}
+
+if(!file.exists(test.file)){
+    download.file(test.url, destfile=test.file)
+}
+
+train.data <- read.csv(train.file)
+test.data  <- read.csv(test.file)
+```
+
+###c. Exploratory Data Analysis
+```{r Exp_Data_Analysis, cache=TRUE}
+dim(train.data)
+dim(train.data)
+```
+
+###d. Data Cleaning
+After downloading and loading the dataset from the given links, the training dataset is partinioned into training and test sets in the ratio of 70:30 for modeling and validations processes respectively. The testing dataset is not changed and will be used only for the quiz results generation.
+```{r Data_Cleaning_1, cache=TRUE}
+# create a partition using caret with the train.data dataset on 70:30 ratio
+train.in  <- createDataPartition(train.data$classe, p=0.7, list=FALSE)
+
+train.set <- train.data[ train.in, ]
+test.set  <- train.data[-train.in, ]
+
+dim(train.set)
+dim(test.set)
+```
+
+Both the datasets just created have 160 variables. Cleaning NA, Near Zero variance variables and the ID variables:
+
+```{r Data_Cleaning_2, cache=TRUE}
+valNZ <- nearZeroVar(train.set)
+
+train.set <- train.set[, -valNZ]
+test.set  <-  test.set[, -valNZ]
+
+dim(test.set)
+dim(train.set)
+```
+
+Removing variables that are mostly NA:
+```{r Removing_NAs, cache=TRUE}
+mostlyNA  <- sapply(train.set, function(x) mean(is.na(x))) > 0.95
+train.set <- train.set[, mostlyNA==FALSE]
+test.set  <-  test.set[, mostlyNA==FALSE]
+
+dim(test.set)
+dim(train.set)
+```
+
+Removing ID variables (columns 1 to 5):
+```{r Removing_IDs, cache=TRUE}
+train.set <- train.set[, -(1:5)]
+test.set  <-  test.set[, -(1:5)]
+```
+
+After cleaning, we can see that the number of vairables for the analysis are now only 53. 
+
+###e. Correlation Analysis
+Analysing correlation among the variables before proceeding to the modeling procedures.
+```{r Correlation_Analysis, cache=TRUE}
+corrplot(cor(train.set[, -54]), method="color", type="lower", 
+         tl.cex=0.5, tl.pos="ld",  tl.srt=45)
+```
+
+Blue indicates positive correlation and brown indicates negative correlation, darker shade representing a stronger correlation whereas light showing very weak correlation.
+
+##4. Model Building for Prediction
+Three popular methods are being applied to model the regressions in the train dataset and the one with higher accuracy when applied to the test dataset will be considered. The methods being used are: 
+* Decision Tree 
+* Random Forest
+* Generalized Boosted Model
+
+A Confusion Matrix is plotted at the end of each analysis to better visualize the accuracy of the models.
+
+###a. Decision Tree
+```{r Modeling_Decision_Tree, cache=TRUE}
+set.seed(mySeedValue)
+mfDecisionTree <- rpart(classe ~ ., data=train.set, method="class")
+prp(mfDecisionTree)
+
+predictDecisionTree <- predict(mfDecisionTree, newdata=test.set, type="class")
+cmDecisionTree  <- confusionMatrix(predictDecisionTree, test.set$classe)
+accDecisionTree <- round(cmDecisionTree$overall['Accuracy'], 4)
+
+cmDecisionTree
+plot(cmDecisionTree$table, col = cmDecisionTree$byClass, 
+     main = paste("Decision Tree\nAccuracy =", accDecisionTree))
+```
+
+###b. Random Forest
+```{r Modeling_Random_Forest, cache=TRUE}
+set.seed(mySeedValue) # for reproducibility
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mfRandomForest <- train(classe ~ ., data=train.set, method="rf", trControl=controlRF)
+mfRandomForest$finalModel
+
+predictRandomForest <- predict(mfRandomForest, newdata=test.set)
+cmRandomForest  <- confusionMatrix(predictRandomForest, test.set$classe)
+accRandomForest <- round(cmRandomForest$overall['Accuracy'], 4)
+
+cmRandomForest
+plot(cmRandomForest$table, col = cmRandomForest$byClass, 
+     main = paste("Random Forest\nAccuracy =", accRandomForest))
+```
+
+###c. Generalized Boosted Model (GBM)
+```{r Modeling_GBM, message=FALSE, cache=TRUE}
+set.seed(mySeedValue)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mfGBM  <- train(classe ~ ., data=train.set, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+mfGBM$finalModel
+
+predictGBM <- predict(mfGBM, newdata=test.set)
+cmGBM  <- confusionMatrix(predictGBM, test.set$classe)
+accGBM <- round(cmGBM$overall['Accuracy'], 4)
+
+cmGBM
+plot(cmGBM$table, col = cmGBM$byClass, 
+     main = paste("GBM\nAccuracy =", accGBM))
+```
+
+##5. Appication of the selected Model to the Test Data
+The accuracy of the three regression modeling methods are:
+
+* Decision Tree : `r accDecisionTree`
+* Random Forest : `r accRandomForest`
+* GBM           : `r accGBM`
+
+Since the accuracy of the the Random Forest technique is higher than the rest, it will be applied to predict the 20 quiz results (testing dataset) as shown below.
+
+```{r Final_Output, cache=TRUE}
+predict.Test <- predict(mfRandomForest, newdata=test.data)
+predict.Test
+```
